@@ -1,4 +1,4 @@
-#The independence example
+#The negative linear dependence example
 
 #install packages
 install.packages("RandomFields")
@@ -25,26 +25,22 @@ spatstat.options(npixel=100)
 sigma2x1 <- 0.7
 rangenom1 <- 0.5
 kappa1 <- sqrt(8)/rangenom1
-
 set.seed(1)
 struc1 <- rLGCP('matern', mu=0, 
-              var=sigma2x1, scale=1/kappa1, nu=1, win=win)
+                var=sigma2x1, scale=1/kappa1, nu=1, win=win)
 
 #get intensity
 Lam11 <- attr(struc1, 'Lambda')
 summary(as.vector(ll11 <- log(Lam11$v)))
 
 #plotting
-par(mfrow=c(1,1))
-image.plot(list(x=Lam11$yrow, y=Lam11$xcol, z=ll11), asp=1)
+image.plot(list(x=Lam11$yrow, y=Lam11$xcol, z=ll11), main='Spatially structured effect', asp=1, col = tim.colors(64))
 
 #generate latent field and point pattern
 set.seed(1)
 mwn1 <- 6 + rnorm(10000, mean = 0, sd = 0.1) #mean plus white noise
 mat1 <- matrix(mwn1, nrow=100, ncol=100)
 image1 <- im(mat1, xrange=c(0,1), yrange=c(0,1))
-max(ll11) - min(ll11)
-max(ll21) - min(ll21)
 
 #simulation
 set.seed(1)
@@ -60,8 +56,10 @@ summary(as.vector(ll12 <- log(Lam12$v)))
 
 #plotting
 par(mfrow=c(1,1))
-image.plot(list(x=Lam12$yrow, y=Lam12$xcol, z=ll12), asp=1)
+image.plot(list(x=Lam12$yrow, y=Lam12$xcol, z=ll12), main='log-Lambda', asp=1)
 points(xy1, pch=19) 
+
+
 
 
 
@@ -70,7 +68,6 @@ points(xy1, pch=19)
 sigma2x2 <- 0.5
 rangenom2 <- 0.3
 kappa2 <- sqrt(8)/rangenom2
-
 set.seed(2)
 struc2 <- rLGCP('matern', mu=0, 
                 var=sigma2x2, scale=1/kappa2, nu=1, win=win)
@@ -80,15 +77,15 @@ Lam21 <- attr(struc2, 'Lambda')
 summary(as.vector(ll21 <- log(Lam21$v)))
 
 #plotting
-image.plot(list(x=Lam21$yrow, y=Lam21$xcol, z=ll21), asp=1)
+image.plot(list(x=Lam21$yrow, y=Lam21$xcol, z=ll21), main='Spatially structured effect', asp=1)
 
-#generate latent field and point pattern
+#add spatially structured effect of first process
 set.seed(2)
-mwn2 <- 5 + rnorm(10000, mean = 0, sd = 0.1) #mean plus white noise
-mat2 <- matrix(mwn2, nrow=100, ncol=100)
-image2 <- im(mat2, xrange=c(0,1), yrange=c(0,1))
+beta3 <- -0.5
+mwn2 <- 5  + beta3*ll11 + rnorm(10000, mean = 0, sd = 0.1) #mean plus spatially structured effect of first process plus white noise
+image2 <- im(mwn2, xrange=c(0,1), yrange=c(0,1))
 
-#simulation
+#simuation
 set.seed(2)
 pp2 <- rLGCP('matern', image2, 
              var=sigma2x2, scale=1/kappa2, nu=1, win=win)
@@ -108,25 +105,24 @@ points(xy2, pch=19)
 
 
 
-
-
 ## Inference
 #create a mesh
 loc.d <- t(matrix(c(0,0,1,0,1,1,0,1,0,0), 2))
 (nv <- (mesh <- inla.mesh.2d(
   loc.domain=loc.d, offset=c(.1, .5), 
   max.edge=c(.06, 0.5), cutoff=.02))$n) 
- 
+
+
 #SPDE model definition
 spde1 <- inla.spde2.pcmatern(
   mesh=mesh, alpha=2,
-  prior.range=c(0.05, 0.05), 
-  prior.sigma=c(1, 0.05)) 
+  prior.range=c(0.5, 0.5), 
+  prior.sigma=c(1, 0.3)) 
 
 spde2 <- inla.spde2.pcmatern(
   mesh=mesh, alpha=2,
-  prior.range=c(0.05, 0.05), 
-  prior.sigma=c(2, 0.05))  
+  prior.range=c(0.3, 0.5), 
+  prior.sigma=c(1, 0.3))  
 
 #dual mesh function
 inla.mesh.dual <- function(mesh) {
@@ -169,7 +165,7 @@ inla.mesh.dual <- function(mesh) {
 }
 dmesh <- inla.mesh.dual(mesh)
 
-#spatial polygons
+#spatial polygon
 domainSP <- SpatialPolygons(list(Polygons(
   list(Polygon(loc.d)), '0')))
 
@@ -180,11 +176,12 @@ sum(w <- sapply(1:length(dmesh), function(i) {
   else return(0)
 }))
 
+
 #observations
 (n1 <- nrow(xy1))
 y1 <- cbind(rep(0:1, c(nv, n1)))
 (n2 <- nrow(xy2))
-y2 <- rep(0:1, c(nv, n2))
+y2 <- cbind(rep(0:1, c(nv, n2)))
 
 #expected observations
 e1 <- c(w, rep(0, n1)) 
@@ -205,55 +202,52 @@ ny2 <- nrow(as.matrix(y2))
 y = matrix(NA, (ny1+ny2), 2)
 y[1:ny1, 1] = y1
 y[1:ny2 + ny1, 2] = y2
-
-#joint model
 stk1 <- inla.stack(data=list(y=cbind(y1,NA), e=e1), 
-                      A=list(1,A1), tag='pp1',
-                      effects=list(list(b1=rep(1,nv+n1)), list(i=1:nv))) 
+                   A=list(1,A1), tag='pp1',
+                   effects=list(list(b1=rep(1,nv+n1)), list(i=1:nv))) 
 stk2 <- inla.stack(data=list(y=cbind(NA,y2), e=e2),
-                      A=list(1,A2), tag='pp2',
-                      effects=list(list(b2=rep(1,nv+n2)), list(j=1:nv)))
+                   A=list(1,A2,A2), tag='pp2',
+                   effects=list(list(b2=rep(1,nv+n2)), list(k=1:nv), list(j=1:nv)))
 
 stk <- inla.stack(stk1, stk2)
 
 
+sys.time.NegLinDep <- system.time(res.neglindep <- inla(y ~ 0 + b1 + b2 + f(i, model=spde1) + f(k, copy="i", fixed=FALSE) + f(j, model=spde2), 
+                                                 family=c('poisson', 'poisson'), data=inla.stack.data(stk), 
+                                                 control.predictor=list(A=inla.stack.A(stk)),
+                                                 #control.compute=list(dic=TRUE, waic=TRUE, cpo=TRUE),
+                                                 E=inla.stack.data(stk)$e))
 
-sys.time.indepm <- system.time(res.ind.m <- inla(y ~ 0 + b1 + b2 + f(i, model=spde1) + f(j, model=spde2), 
-                                              family=c('poisson', 'poisson'), data=inla.stack.data(stk),
-                                              control.predictor=list(A=inla.stack.A(stk)),
-                                              #control.compute=list(dic=TRUE, waic=TRUE, cpo=TRUE),
-                                              E=inla.stack.data(stk)$e))
 
 #hpd intervals
-
-ms1=res.ind.m$marginals.hyperpar$`Stdev for i`
+ms1=res.neglindep$marginals.hyperpar$`Stdev for i`
 hpds1 <- inla.hpdmarginal(0.95, ms1)
 
-mr1=res.ind.m$marginals.hyperpar$`Range for i`
+mr1=res.neglindep$marginals.hyperpar$`Range for i`
 hpdr1 <- inla.hpdmarginal(0.95, mr1)
 
-ms2=res.ind.m$marginals.hyperpar$`Stdev for j`
+ms2=res.neglindep$marginals.hyperpar$`Stdev for j`
 hpds2 <- inla.hpdmarginal(0.95, ms2)
 
-mr2=res.ind.m$marginals.hyperpar$`Range for j`
+mr2=res.neglindep$marginals.hyperpar$`Range for j`
 hpdr2 <- inla.hpdmarginal(0.95, mr2)
 
 #plots for Process 1
 #par(mfrow=c(1,3), mar=c(3,3,1,0.3), mgp=c(2,1,0)) 
 par(mfrow=c(1,1), mai=c(1,1,1,1))
-plot(res.ind.m$marginals.fix[[1]], type='l', mgp=c(2.2,0.6,0), xlim=c(4,8),
+plot(res.neglindep$marginals.fix[[1]], type='l', mgp=c(2.2,0.6,0), xlim=c(4,8.5),
      xlab=expression(beta[1]), ylab='Density')
 abline(v=mean(mwn1), col=2)
-abline(v=res.ind.m$summary.fixed$`0.025quant`[1], lty=2)
-abline(v=res.ind.m$summary.fixed$`0.975quant`[1], lty=2)
+abline(v=res.neglindep$summary.fixed$`0.025quant`[1], lty=2)
+abline(v=res.neglindep$summary.fixed$`0.975quant`[1], lty=2)
 
-plot(res.ind.m$marginals.hyperpar[[2]], type='l', xlim = c(0.2,2.5), mgp=c(2.1,0.6,0), 
+plot(res.neglindep$marginals.hyperpar[[2]], type='l', xlim = c(0.2,2.5), mgp=c(2.1,0.6,0), 
      xlab=expression(sigma[f[1]]^2), ylab='Density')
 abline(v=sigma2x1, col=2)
 abline(v=hpds1[,1], lty=2)
 abline(v=hpds1[,2], lty=2)
 
-plot(res.ind.m$marginals.hyperpar[[1]], type='l', xlim = c(0.2,2), mgp=c(1.8,0.6,0),
+plot(res.neglindep$marginals.hyperpar[[1]], type='l', xlim = c(0.2,3.5), mgp=c(1.8,0.6,0),
      xlab=expression(rho[1]), ylab='Density')
 abline(v=sqrt(8*1)/kappa1, col=2)
 abline(v=hpdr1[,1], lty=2)
@@ -262,26 +256,32 @@ abline(v=hpdr1[,2], lty=2)
 
 #plots for Process 2
 #par(mfrow=c(1,3), mar=c(3,3,1,0.3), mgp=c(2,1,0)) 
-plot(res.ind.m$marginals.fix[[2]], type='l',  mgp=c(2,0.6,0), xlim=c(4,6),
+plot(res.neglindep$marginals.fix[[2]], type='l',  mgp=c(2,0.6,0), xlim=c(3.5,7),
      xlab=expression(beta[2]), ylab='Density')
 abline(v=mean(mwn2), col=2)
-abline(v=res.ind.m$summary.fixed$`0.025quant`[2], lty=2)
-abline(v=res.ind.m$summary.fixed$`0.975quant`[2], lty=2)
+abline(v=res.neglindep$summary.fixed$`0.025quant`[2], lty=2)
+abline(v=res.neglindep$summary.fixed$`0.975quant`[2], lty=2)
 
-plot(res.ind.m$marginals.hyperpar[[4]], type='l', xlim = c(0.2,2.5), mgp=c(2.1,0.6,0), 
+plot(res.neglindep$marginals.hyperpar[[4]], type='l', xlim = c(0.2,2.5), mgp=c(2.1,0.6,0), 
      xlab=expression(sigma[f[2]]^2), ylab='Density')
 abline(v=sigma2x2, col=2)
 abline(v=hpds2[,1], lty=2)
 abline(v=hpds2[,2], lty=2)
 
-plot(res.ind.m$marginals.hyperpar[[3]], type='l', xlim = c(0,2), mgp=c(1.8,0.6,0),
+plot(res.neglindep$marginals.hyperpar[[3]], type='l', xlim = c(0,2), mgp=c(1.8,0.6,0),
      xlab=expression(rho[2]), ylab='Density')
 abline(v=sqrt(8*1)/kappa2, col=2)
 abline(v=hpdr2[,1], lty=2)
 abline(v=hpdr2[,2], lty=2)
 
+plot(res.neglindep$marginals.hyperpar[[5]], type='l', xlim = c(-1.5,1.5), mgp=c(1.8,0.6,0),
+     xlab=expression(beta[3]), ylab='Density')
+abline(v=beta3, col=2)
+abline(v=res.neglindep$summary.hyper$`0.025quant`[5], lty=2)
+abline(v=res.neglindep$summary.hyper$`0.975quant`[5], lty=2)
 
 pgrid0 <- inla.mesh.projector(mesh, xlim=0:1, ylim=0:1, dims=c(101,101))
-prd0.m <- inla.mesh.project(pgrid0, (mean(mwn1) + res.ind.m$summary.ran$i$mean))
+prd0.m <- inla.mesh.project(pgrid0, (mean(mwn2) + res.neglindep$summary.ran$j$mean))
 par(mfrow=c(1,1))
+x11()
 image.plot(prd0.m, asp=1)
